@@ -1,3 +1,17 @@
+# 
+# A server that complements the RAW seedlink plugin. 
+# The server listen to RAW clients (seelink plugins) on a TCP socket and
+# send them the data of the channels they subscribes to.
+# 
+# This reference server can be used without modification to send your own data.
+# See the main function for an example on how to use it
+#
+# Copyright (c) 2021 Swiss Seismological Service (SED)
+# 
+# Written by Luca Scarabello @ ETH Zuerich
+#
+
+
 import asyncio
 import multiprocessing
 import logging
@@ -362,8 +376,7 @@ class Streamer():
 
 if __name__ == "__main__":
     #
-    # Test with 3 streamer servers. The channels dicts contain
-    # 'key:value' items as 'channed_id:sample_rate'
+    # Test with 3 streamer servers
     #
     channels1 = [Channel(i, 100, 'big', 2) for i in range(1, 5)]
     channels2 = [Channel(i, 4000, 'little', 1) for i in range(5, 10)]

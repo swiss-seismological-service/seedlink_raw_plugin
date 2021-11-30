@@ -1,18 +1,11 @@
 /*
- * raw_plugin.cc:
  * A SeedLink plugin that collects data from a TCP socket and passes it on
- * to SeedLink via send_raw3 interface
+ * to SeedLink.
  *
  * This plugin requires a barebone minimalistic server on the trasmitter
  * side and allow to easily add data to Seelink without much effort.
  *
- * GNU Affero General Public License printUsageAndExit
- * This file may be used under the terms of the GNU Affero
- * Public License version 3.0 as published by the Free Software Foundation
- * and appearing in the file LICENSE included in the packaging of this
- * file. Please review the following information to ensure the GNU Affero
- * Public License version 3.0 requirements will be met:
- * https://www.gnu.org/licenses/agpl-3.0.html.
+ * Copyright (c) 2021 Swiss Seismological Service (SED)
  *
  * Written by Luca Scarabello @ ETH Zuerich
  */
@@ -663,6 +656,9 @@ public:
         unsigned char *data = _dataBuf.data();
         _client.receive(data, dataSize);
 
+        //
+        // Convert samples and pass them to Seedlink
+        // 
         if (_sampleBuf.size() < header.numSamples)
           _sampleBuf.resize(header.numSamples);
 
