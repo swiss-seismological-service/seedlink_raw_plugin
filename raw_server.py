@@ -340,7 +340,7 @@ class Streamer():
             self.data_conn.send(data)
         except Exception as e:
             logger.error(f"Exception while feeding data: {e}")
-            minimum_elapsed_time = datetime.timedelta(seconds=60)
+            minimum_elapsed_time = datetime.timedelta(seconds=300)
             now = datetime.datetime.utcnow()
             if now - self.last_start > minimum_elapsed_time:
                 logger.info("Restarting server...")

@@ -749,7 +749,7 @@ int main(int argc, char **argv)
   int port = -1;
   string stream;
   string componentMap;
-  int sleepTime   = 30;
+  int sleepTime   = 60;
   bool daemonMode = false;
 
   if (argc < 2)
