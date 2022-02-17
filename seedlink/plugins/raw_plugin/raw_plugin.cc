@@ -769,7 +769,7 @@ int main(int argc, char **argv)
   int port = -1;
   string stream;
   string componentMap;
-  string mseedEncoding;
+  string mseedEncoding = "STEIM2";
   int sleepTime   = 60;
   bool daemonMode = false;
 
@@ -779,7 +779,7 @@ int main(int argc, char **argv)
   }
 
   char c;
-  while ((c = getopt(argc, argv, "Ds:p:c:r:m:")) != EOF)
+  while ((c = getopt(argc, argv, "Ds:p:c:r:m:e:")) != EOF)
   {
     switch (c)
     {
