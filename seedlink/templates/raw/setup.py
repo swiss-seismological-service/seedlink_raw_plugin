@@ -37,6 +37,11 @@ class SeedlinkPluginHandler:
       channelCode = ""
       seedlink.setParam('sources.raw.channelCode', channelCode)
 
+    try: miniSeedEncoding = seedlink.param('sources.raw.miniSeedEncoding')
+    except:
+      miniSeedEncoding = "STEIM2"
+      seedlink.setParam('sources.raw.miniSeedEncoding', miniSeedEncoding)
+
     stream = seedlink.net + '.' + seedlink.sta + '.' + locationCode + '.' + channelCode
     seedlink.setParam('sources.raw.stream', stream)
 
@@ -47,8 +52,7 @@ class SeedlinkPluginHandler:
       componentMap = ""
       seedlink.setParam('sources.raw.componentMap', componentMap)
 
-    # key is station (one instance per station) - no multiple sensors per station allowed
-    return seedlink.net + '.' + seedlink.sta
+    return stream
 
   # Flush does nothing
   def flush(self, seedlink):

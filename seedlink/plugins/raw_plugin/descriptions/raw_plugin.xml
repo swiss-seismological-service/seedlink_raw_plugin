@@ -15,7 +15,7 @@
 			</parameter>
 			<parameter name="locationCode" type="string" default="">
 				<description>
- 				Since the bindings are NET.STA based this information is required to know the location code the data refers to: NET.STA.LOC.CHA
+				Since the bindings are NET.STA based this information is required to know the location code the data refers to: NET.STA.LOC.CHA
 				</description>
 			</parameter> 
 			<parameter name="channelCode" type="string" default="">
@@ -23,11 +23,16 @@
 					Since the bindings are NET.STA based this information is required to know the channel code the data refers to: NET.STA.LOC.CHA
 				</description>
 			</parameter> 
- 			<parameter name="componentMap" type="string" default="">
+			<parameter name="componentMap" type="string" default="">
 				<description>
 					Specify the list of mappings between server data channels and their corresponding seiscomp components of the form "ch1:comp1,ch2:comp2,...,chX:compX". Each data channel will be requested to the server and it will be mapped to the corresponding seiscomp component when the data is passed to Seedlink. For a 3 component station a typical value might be "1:N,2:E,3:Z" (channel 1, 2, 3 will be requested and mapped to components N, E, Z) or "1:1,2:2,3:3". For a single component station it can be "1:1" (channel 1 will be requested and mapped to componet 1). The channel is an integer number that will be requested to the server as is, the meaning of that channel numner is server dependent. The component string must match one of the station components configured in the seiscomp inventory.
 				</description>
-			</parameter>      
+			</parameter>			
+			<parameter name="miniSeedEncoding" type="string" default="STEIM2">
+				<description>
+				The data packets received by the raw plugin are converted to miniseeds and passed to seedlink. This parameter defines the encoding of the miniseed samples. Available options are: ASCII, INT16, INT32, STEIM1 and STEIM2
+				</description>
+			</parameter>	
 		</configuration>
 	</binding>
 </seiscomp>

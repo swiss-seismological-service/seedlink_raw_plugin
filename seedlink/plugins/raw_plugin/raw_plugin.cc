@@ -327,6 +327,7 @@ class MiniSeedStreamer
 private:
   MSRecord *_pmsr = nullptr;
   int _sequence_number;
+  unsigned _mseedEncoding;
 
 public:
   const string networkCode;
@@ -339,16 +340,33 @@ public:
                    const string &stationCode_,
                    const string &locationCode_,
                    const string &channelCode_,
-                   unsigned _samprate)
+                   unsigned samprate_,
+                   const string &mseedEncoding_)
       : networkCode(networkCode_), stationCode(stationCode_),
         locationCode(locationCode_), channelCode(channelCode_),
-        samprate(_samprate)
+        samprate(samprate_)
   {
     _pmsr = ::msr_init(nullptr);
     if (!_pmsr)
     {
       throw UnrecoverableError("msr_init failed");
     }
+
+    static const unordered_map<string, unsigned> encodings = {
+      {"ASCII", DE_ASCII},
+      {"INT16", DE_INT16},
+      {"INT32", DE_INT32},
+      {"STEIM1",DE_STEIM1},
+      {"STEIM2",DE_STEIM2}
+    };
+    try {
+      _mseedEncoding = encodings.at(mseedEncoding_);
+    }
+    catch(std::out_of_range &e)
+    {
+      throw UnrecoverableError("Invaling encoding: " + mseedEncoding_);
+    }
+
     _sequence_number = 1;
   }
 
@@ -374,7 +392,7 @@ public:
     _pmsr->dataquality = 'D';
     _pmsr->samprate    = samprate;
     _pmsr->sampletype  = 'i';
-    _pmsr->encoding    = DE_STEIM2;
+    _pmsr->encoding    = _mseedEncoding;
     _pmsr->byteorder   = 1;
 
     _pmsr->sequence_number = _sequence_number;
@@ -453,10 +471,6 @@ private:
   unordered_map<unsigned, Component> _components;
   unordered_map<unsigned, ChannelSettings> _chSettings;
 
-  unsigned char _hdrBuf[19];
-  vector<unsigned char> _dataBuf;
-  vector<int32_t> _sampleBuf;
-
   void handshake()
   {
     // agree on the protocol
@@ -533,7 +547,7 @@ private:
 
       kv.second.msStreamer.reset(new MiniSeedStreamer(
           networkCode, stationCode, locationCode, kv.second.fullChannelCode,
-          settings.samplingRate));
+          settings.samplingRate, mseedEncoding));
     }
 
     // start streaming data
@@ -550,6 +564,7 @@ public:
   const string stationCode;
   const string locationCode;
   const string channelCode;
+  const string mseedEncoding;
 
   RawClient(const string &host_,
             int port_,
@@ -558,10 +573,11 @@ public:
             const string &stationCode_,
             const string &locationCode_,
             const string &channelCode_,
-            const string &componentMap)
+            const string &componentMap,
+            const string &mseedEncoding_)
       : _client(host_, port_), host(host_), port(port_), sleepTime(sleepTime_),
         networkCode(networkCode_), stationCode(stationCode_),
-        locationCode(locationCode_), channelCode(channelCode_)
+        locationCode(locationCode_), channelCode(channelCode_), mseedEncoding(mseedEncoding_)
   {
     static const regex re("^([0-9]+):(\\w)(,)?", regex::optimize);
     smatch m;
@@ -601,6 +617,10 @@ public:
              (uint32_t(a[1]) << 8) | a[0];
     };
 
+    unsigned char hdrBuf[19];
+    vector<unsigned char> dataBuf;
+    vector<int32_t> sampleBuf;
+
     for (;;)
     {
       try
@@ -612,7 +632,7 @@ public:
         }
 
         // Read header from the server
-        _client.receive(_hdrBuf, sizeof(_hdrBuf));
+        _client.receive(hdrBuf, sizeof(hdrBuf));
 
         //
         // parse header
@@ -624,14 +644,14 @@ public:
           uint32_t numSamples;
         } header;
 
-        header.pt.year    = bigToUint16(&_hdrBuf[0]);
-        header.pt.yday    = bigToUint16(&_hdrBuf[2]);
-        header.pt.hour    = _hdrBuf[4];
-        header.pt.minute  = _hdrBuf[5];
-        header.pt.second  = _hdrBuf[6];
-        header.pt.usec    = bigToUint32(&_hdrBuf[7]);
-        header.channel    = bigToUint32(&_hdrBuf[11]);
-        header.numSamples = bigToUint32(&_hdrBuf[15]);
+        header.pt.year    = bigToUint16(&hdrBuf[0]);
+        header.pt.yday    = bigToUint16(&hdrBuf[2]);
+        header.pt.hour    = hdrBuf[4];
+        header.pt.minute  = hdrBuf[5];
+        header.pt.second  = hdrBuf[6];
+        header.pt.usec    = bigToUint32(&hdrBuf[7]);
+        header.channel    = bigToUint32(&hdrBuf[11]);
+        header.numSamples = bigToUint32(&hdrBuf[15]);
 
         // Log::info("Header content: num samples %d channel %d (year %d"
         //           " day %d hour %d minute %d second %d usec %d)",
@@ -651,21 +671,21 @@ public:
         // Read samples from the server
         //
         unsigned dataSize = header.numSamples * settings.sampleSize;
-        if (_dataBuf.size() < dataSize) _dataBuf.resize(dataSize);
+        if (dataBuf.size() < dataSize) dataBuf.resize(dataSize);
 
-        unsigned char *data = _dataBuf.data();
+        unsigned char *data = dataBuf.data();
         _client.receive(data, dataSize);
 
         //
         // Convert samples and pass them to Seedlink
         // 
-        if (_sampleBuf.size() < header.numSamples)
-          _sampleBuf.resize(header.numSamples);
+        if (sampleBuf.size() < header.numSamples)
+          sampleBuf.resize(header.numSamples);
 
-        int32_t *samples = _sampleBuf.data();
+        int32_t *samples = sampleBuf.data();
         for (unsigned i = 0; i < header.numSamples; i++)
         {
-          int32_t sample;
+          int32_t sample = 0;
           if (settings.sampleSize == 1)
             sample = static_cast<char>(data[i]);
           else if (settings.sampleSize == 2)
@@ -749,6 +769,7 @@ int main(int argc, char **argv)
   int port = -1;
   string stream;
   string componentMap;
+  string mseedEncoding;
   int sleepTime   = 60;
   bool daemonMode = false;
 
@@ -768,6 +789,7 @@ int main(int argc, char **argv)
     case 'c': stream = optarg; break;
     case 'r': sleepTime = atoi(optarg); break;
     case 'm': componentMap = optarg; break;
+    case 'e': mseedEncoding = optarg; break;
     default: printUsageAndExit(argc, argv); break;
     }
   }
@@ -810,7 +832,7 @@ int main(int argc, char **argv)
   }
 
   RawClient client(host, port, sleepTime, networkCode, stationCode,
-                   locationCode, channelCode, componentMap);
+                   locationCode, channelCode, componentMap, mseedEncoding);
   client.run();
   quit();
 }
