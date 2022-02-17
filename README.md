@@ -21,3 +21,5 @@ seedlink, which make them available to any application connecting to it.
 Finally, to make this plugin work within SeisComP you need to provides the seedlink bindings
 for your station(s). In the bindings you need to select the raw plugin and configure it with
 the address of the server.
+
+![Bindings options](/bindingsOptions.png?raw=true "Bindings options")
