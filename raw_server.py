@@ -122,10 +122,10 @@ class Client:
                                               signed=False))
 
                 # logger.debug(f"Sending {data.num_samples} samples from channel "
-                #        "{data.channel_id} (year {data.time.year} day "
-                #        "{data.time.timetuple().tm_yday} hour "
-                #        "{data.time.hour} min {data.time.minute} sec "
-                #        "{data.time.second} usec {data.time.microsecond})")
+                #        f"{data.channel_id} (year {data.time.year} day "
+                #        f"{data.time.timetuple().tm_yday} hour "
+                #        f"{data.time.hour} min {data.time.minute} sec "
+                #        f"{data.time.second} usec {data.time.microsecond})")
 
                 #
                 # Send samples
