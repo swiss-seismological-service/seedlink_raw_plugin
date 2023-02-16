@@ -27,30 +27,28 @@ class SeedlinkPluginHandler:
       port = "65535"
       seedlink.setParam('sources.raw.port', port)
 
-    try: locationCode = seedlink.param('sources.raw.locationCode')
-    except:
-      locationCode = ""
-      seedlink.setParam('sources.raw.locationCode', locationCode)
-
-    try: channelCode = seedlink.param('sources.raw.channelCode')
-    except:
-      channelCode = ""
-      seedlink.setParam('sources.raw.channelCode', channelCode)
-
     try: miniSeedEncoding = seedlink.param('sources.raw.miniSeedEncoding')
     except:
       miniSeedEncoding = "STEIM2"
       seedlink.setParam('sources.raw.miniSeedEncoding', miniSeedEncoding)
 
-    stream = seedlink.net + '.' + seedlink.sta + '.' + locationCode + '.' + channelCode
-    seedlink.setParam('sources.raw.stream', stream)
+    channelProfiles = seedlink.param('sources.raw.channelProfiles')
 
-    # this is a mandatory parameter and it is requested so that an exception is
-    # raised whether a value has not been provided
-    try: componentMap = seedlink.param('sources.raw.componentMap')
-    except:
-      componentMap = ""
-      seedlink.setParam('sources.raw.componentMap', componentMap)
+    channelCodeMap = ""
+    for profile in channelProfiles.split(","):
+
+        try: locationCode = seedlink.param(f"sources.raw.channelProfile.{profile}.locationCode")
+        except: locationCode = ""
+        channelCodes = seedlink.param(f"sources.raw.channelProfile.{profile}.channelCodes")
+
+        for kv in channelCodes.split(","):
+            channelCode, serverChannel = kv.split(":")
+            channelCodeMap += f"{locationCode}.{channelCode}:{serverChannel},"
+
+    seedlink.setParam('sources.raw.channelCodeMap', channelCodeMap)
+
+    stream = seedlink.net + '.' + seedlink.sta
+    seedlink.setParam('sources.raw.stream', stream)
 
     return stream
 

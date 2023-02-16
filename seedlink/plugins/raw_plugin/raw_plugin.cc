@@ -3,7 +3,7 @@
  * to SeedLink.
  *
  * This plugin requires a barebone minimalistic server on the trasmitter
- * side and allow to easily add data to Seelink without much effort.
+ * side and allows to easily stream data to Seelink without much effort.
  *
  * Copyright (c) 2021 Swiss Seismological Service (SED)
  *
@@ -445,10 +445,10 @@ public:
 class RawClient
 {
 private:
-  struct Component
+  struct Stream
   {
-    string name;
-    string fullChannelCode;
+    string locationCode;
+    string channelCode;
     unique_ptr<MiniSeedStreamer> msStreamer;
   };
 
@@ -468,7 +468,7 @@ private:
   static const unsigned MAX_SAMPLES = 1e6;
 
   TcpClient _client;
-  unordered_map<unsigned, Component> _components;
+  unordered_map<unsigned, Stream> _stream;
   unordered_map<unsigned, ChannelSettings> _chSettings;
 
   void handshake()
@@ -480,7 +480,7 @@ private:
 
     _chSettings.clear();
 
-    for (auto &kv : _components)
+    for (auto &kv : _stream)
     {
       const unsigned channel   = kv.first;
       ChannelSettings settings = {0, Endianness::UNDEFINED, 0};
@@ -546,7 +546,7 @@ private:
       _chSettings[channel] = settings;
 
       kv.second.msStreamer.reset(new MiniSeedStreamer(
-          networkCode, stationCode, locationCode, kv.second.fullChannelCode,
+          networkCode, stationCode, kv.second.locationCode, kv.second.channelCode,
           settings.samplingRate, mseedEncoding));
     }
 
@@ -562,8 +562,6 @@ public:
   const int sleepTime;
   const string networkCode;
   const string stationCode;
-  const string locationCode;
-  const string channelCode;
   const string mseedEncoding;
 
   RawClient(const string &host_,
@@ -571,30 +569,33 @@ public:
             int sleepTime_,
             const string &networkCode_,
             const string &stationCode_,
-            const string &locationCode_,
-            const string &channelCode_,
-            const string &componentMap,
+            const string &channelCodeMap,
             const string &mseedEncoding_)
       : _client(host_, port_), host(host_), port(port_), sleepTime(sleepTime_),
         networkCode(networkCode_), stationCode(stationCode_),
-        locationCode(locationCode_), channelCode(channelCode_), mseedEncoding(mseedEncoding_)
+        mseedEncoding(mseedEncoding_)
   {
-    static const regex re("^([0-9]+):(\\w)(,)?", regex::optimize);
+    static const regex re("^(\\w*)?.(\\w*):([0-9]+)(,)?", regex::optimize);
     smatch m;
-    string input = componentMap;
+    string input = channelCodeMap;
     while (regex_search(input, m, re))
     {
-      unsigned channel = stoul(m[1].str());
-      string name      = m[2].str();
+      string locationCode = m[1].str();
+      string channelCode  = m[2].str();
+      unsigned channel = stoul(m[3].str());
 
-      _components[channel] = {name, channelCode + name, nullptr};
+      _stream[channel] = {locationCode, channelCode, nullptr};
+
+      Log::info("Server channel %d -> %s.%s.%s.%s", channel,
+                networkCode.c_str(), stationCode.c_str(),
+                locationCode.c_str(), channelCode.c_str());
 
       input = input.substr(m.length());
     }
-    if (_components.empty() || !input.empty())
+    if (_stream.empty() || !input.empty())
     {
-      throw RecoverableError("Unsuitable components map provided: '" +
-                             componentMap + "'");
+      throw RecoverableError("Unsuitable stream map provided: '" +
+                             channelCodeMap + "'");
     }
   }
 
@@ -710,14 +711,14 @@ public:
         }
 
         // Log::info("Sending %d samples to seedlink", header.numSamples);
-        _components.at(header.channel)
+        _stream.at(header.channel)
             .msStreamer->sendtoSeedlink(&header.pt, samples, header.numSamples);
       }
       catch (RecoverableError &e)
       {
         Log::error("Exception: %s", e.what());
         _client.close();
-        for (auto &kv : _components) kv.second.msStreamer = nullptr;
+        for (auto &kv : _stream) kv.second.msStreamer = nullptr;
         ::sleep(sleepTime);
         continue;
       }
@@ -752,7 +753,8 @@ void printUsageAndExit(int argc, char **argv)
   Log::error("Required:");
   Log::error("    -s host    server address, required");
   Log::error("    -p port    server port");
-  Log::error("    -c stream  the stream the data refers to (NET.STA.LOC.CHAN)");
+  Log::error("    -c stream  the stream the data refers to (NET.STA)");
+  Log::error("    -m chmap   map of location and channel codes to server channel numbers");
   Log::error("Options:");
   Log::error("    -r secs    sleep time in seonds before reconnecting");
   Log::error("                after an EOF or connect failure,");
@@ -768,7 +770,7 @@ int main(int argc, char **argv)
   string host;
   int port = -1;
   string stream;
-  string componentMap;
+  string channelCodeMap;
   string mseedEncoding = "STEIM2";
   int sleepTime   = 60;
   bool daemonMode = false;
@@ -788,7 +790,7 @@ int main(int argc, char **argv)
     case 'p': port = atoi(optarg); break;
     case 'c': stream = optarg; break;
     case 'r': sleepTime = atoi(optarg); break;
-    case 'm': componentMap = optarg; break;
+    case 'm': channelCodeMap = optarg; break;
     case 'e': mseedEncoding = optarg; break;
     default: printUsageAndExit(argc, argv); break;
     }
@@ -801,15 +803,13 @@ int main(int argc, char **argv)
 
   static const std::regex dot("\\.", std::regex::optimize);
   std::vector<std::string> tokens(splitString(stream, dot));
-  if (tokens.size() != 4)
+  if (tokens.size() != 2)
   {
-    Log::error("-c option should be in the format STA.NET.LOC.CHA");
+    Log::error("-c option should be in the format STA.NET");
     quit();
   }
   string networkCode  = tokens[0];
   string stationCode  = tokens[1];
-  string locationCode = tokens[2];
-  string channelCode  = tokens[3];
 
   struct sigaction sa;
   sa.sa_handler = quit;
@@ -832,7 +832,7 @@ int main(int argc, char **argv)
   }
 
   RawClient client(host, port, sleepTime, networkCode, stationCode,
-                   locationCode, channelCode, componentMap, mseedEncoding);
+                   channelCodeMap, mseedEncoding);
   client.run();
   quit();
 }
