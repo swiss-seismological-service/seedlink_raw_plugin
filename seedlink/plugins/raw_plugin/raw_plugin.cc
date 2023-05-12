@@ -748,7 +748,7 @@ void quit(int sig = 0)
 void printUsageAndExit(int argc, char **argv)
 {
 
-  Log::error("usage: raw [options] -s host -p port -c stream");
+  Log::error("usage: raw [options] -s host -p port -c stream -m chmap");
   Log::error("");
   Log::error("Required:");
   Log::error("    -s host    server address, required");
@@ -780,10 +780,10 @@ int main(int argc, char **argv)
     printUsageAndExit(argc, argv);
   }
 
-  char c;
-  while ((c = getopt(argc, argv, "Ds:p:c:r:m:e:")) != EOF)
+  int opt;
+  while ((opt = getopt(argc, argv, "Ds:p:c:r:m:e:")) != -1)
   {
-    switch (c)
+    switch (opt)
     {
     case 'D': daemonMode = true; break;
     case 's': host = optarg; break;
@@ -796,7 +796,7 @@ int main(int argc, char **argv)
     }
   }
 
-  if (host.empty() || stream.empty())
+  if (host.empty() || stream.empty() || channelCodeMap.empty() || port <= 0)
   {
     printUsageAndExit(argc, argv);
   }
