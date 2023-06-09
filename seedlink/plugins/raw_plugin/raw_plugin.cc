@@ -465,7 +465,7 @@ private:
     unsigned sampleSize;
   };
 
-  static const unsigned MAX_SAMPLES = 1e6;
+  static const unsigned MAX_SAMPLES = 1e6; // no specific reason for this value
 
   TcpClient _client;
   unordered_map<unsigned, Stream> _stream;
