@@ -65,6 +65,7 @@ class Log
 private:
   static const int LOGMSGLEN = 256;
 
+private:
   static void log(bool isError, char *msg)
   {
     if (useSyslog)
@@ -75,7 +76,8 @@ private:
     {
       time_t t = ::time(nullptr);
       char *p  = ::asctime(::localtime(&t));
-      fprintf((isError ? stderr : stdout), "%.*s - %s: %s\n", strlen(p) - 1, p,
+      int len = strlen(p) - 1;
+      fprintf((isError ? stderr : stdout), "%.*s - %s: %s\n", len, p,
               ::plugin_name, msg);
     }
   }
@@ -83,6 +85,7 @@ private:
 public:
   static bool useSyslog;
 
+public:
   static void info(const char *fmt, ...)
   {
     char buf[LOGMSGLEN];
@@ -120,6 +123,7 @@ public:
   const std::string address;
   const int port;
 
+public:
   TcpClient(const std::string &address_, int port_)
       : _sock(-1), address(address_), port(port_)
   {}
@@ -139,6 +143,12 @@ public:
     }
     _sock = -1;
   }
+
+  TcpClient(const TcpClient &other)            = default;
+  TcpClient &operator=(const TcpClient &other) = default;
+
+  TcpClient(TcpClient &&other)            = default;
+  TcpClient &operator=(TcpClient &&other) = default;
 
   void connect()
   {
@@ -325,9 +335,47 @@ const string TcpClient::LINEEND = "\n";
 class MiniSeedStreamer
 {
 private:
+  class SampleBuffer
+  {
+  public:
+    virtual void prepare(uint32_t numSamples) = 0;
+    virtual void feed(int32_t sample)    = 0;
+    virtual void feed(float sample)      = 0;
+    virtual void feed(double sample)     = 0;
+    virtual uint32_t numSamples() const  = 0;
+    virtual void *data()                 = 0;
+  };
+
+  template <class T> class SampleBufferImpl : public SampleBuffer
+  {
+  private:
+    vector<T> vec;
+
+  public:
+    void prepare(uint32_t numSamples) override
+    {
+      vec.clear();
+      if (vec.capacity() < numSamples)
+      {
+        vec.reserve(numSamples);
+      }
+    }
+    void feed(int32_t sample) override { vec.push_back(sample); }
+    void feed(float sample) override { vec.push_back(sample); }
+    void feed(double sample) override { vec.push_back(sample); }
+    uint32_t numSamples() const override { return vec.size(); }
+    void *data() override { return vec.data(); }
+  };
+
+private:
   MSRecord *_pmsr = nullptr;
   int _sequence_number;
-  unsigned _mseedEncoding;
+  struct DataType
+  {
+    unsigned encoding;
+    char sampletype;
+  } _dataType;
+  unique_ptr<SampleBuffer> _sampleBuf;
 
 public:
   const string networkCode;
@@ -336,6 +384,7 @@ public:
   const string channelCode;
   const unsigned samprate;
 
+public:
   MiniSeedStreamer(const string &networkCode_,
                    const string &stationCode_,
                    const string &locationCode_,
@@ -352,22 +401,42 @@ public:
       throw UnrecoverableError("msr_init failed");
     }
 
-    static const unordered_map<string, unsigned> encodings = {
-      {"ASCII", DE_ASCII},
-      {"INT16", DE_INT16},
-      {"INT32", DE_INT32},
-      {"STEIM1",DE_STEIM1},
-      {"STEIM2",DE_STEIM2}
+    static const unordered_map<string, DataType> encodings = {
+        {"INT16", {DE_INT16, 'i'}},
+        {"INT32", {DE_INT32, 'i'}},
+        {"STEIM1", {DE_STEIM1, 'i'}},
+        {"STEIM2", {DE_STEIM2, 'i'}},
+        {"FLOAT32", {DE_FLOAT32, 'f'}},
+        {"FLOAT64", {DE_FLOAT64, 'd'}}
     };
-    try {
-      _mseedEncoding = encodings.at(mseedEncoding_);
+
+    try
+    {
+      string mseedEncodingUpper(mseedEncoding_);
+      std::transform(mseedEncoding_.begin(), mseedEncoding_.end(),
+                     mseedEncodingUpper.begin(), ::toupper);
+      _dataType = encodings.at(mseedEncodingUpper);
     }
-    catch(std::out_of_range &e)
+    catch (std::out_of_range &e)
     {
       throw UnrecoverableError("Invaling encoding: " + mseedEncoding_);
     }
 
     _sequence_number = 1;
+
+    switch (_dataType.encoding)
+    {
+    case DE_INT16:  case DE_INT32:
+    case DE_STEIM1: case DE_STEIM2: 
+      _sampleBuf.reset(new SampleBufferImpl<int32_t>()); 
+       break;
+    case DE_FLOAT32: 
+       _sampleBuf.reset(new SampleBufferImpl<float>());
+       break;
+    case DE_FLOAT64: 
+       _sampleBuf.reset(new SampleBufferImpl<double>());
+       break;
+    }
   }
 
   ~MiniSeedStreamer()
@@ -377,13 +446,33 @@ public:
     ::msr_free(&_pmsr);
   }
 
-  void sendtoSeedlink(const struct ptime *pt, int32_t *dataptr, int numSamples)
+  MiniSeedStreamer(const MiniSeedStreamer &other)            = delete;
+  MiniSeedStreamer &operator=(const MiniSeedStreamer &other) = delete;
+
+  MiniSeedStreamer(MiniSeedStreamer &&other)            = delete;
+  MiniSeedStreamer &operator=(MiniSeedStreamer &&other) = delete;
+
+  void prepare(uint32_t numSamples) { _sampleBuf->prepare(numSamples); }
+
+  void feed(int32_t sample) { _sampleBuf->feed(sample); }
+
+  void feed(float sample) { _sampleBuf->feed(sample); }
+
+  void feed(double sample) { _sampleBuf->feed(sample); }
+
+  void send(const struct ptime *pt)
+  {
+    send(pt, _sampleBuf->data(), _sampleBuf->numSamples());
+  }
+
+private:
+  void send(const struct ptime *pt, void *dataptr, int64_t numSamples)
   {
     // Disconnect datasamples pointer, otherwise mst_init() will free it
     _pmsr->datasamples = nullptr;
     ::msr_init(_pmsr);
 
-    // Set header, always the same (I wish I could avoid re-initialization)
+    // Set header, always the same (Could we avoid re-initialization?)
     _pmsr->reclen = PLUGIN_MSEED_SIZE;
     strcpy(_pmsr->network, networkCode.c_str());
     strcpy(_pmsr->station, stationCode.c_str());
@@ -391,8 +480,8 @@ public:
     strcpy(_pmsr->channel, channelCode.c_str());
     _pmsr->dataquality = 'D';
     _pmsr->samprate    = samprate;
-    _pmsr->sampletype  = 'i';
-    _pmsr->encoding    = _mseedEncoding;
+    _pmsr->sampletype  = _dataType.sampletype;
+    _pmsr->encoding    = _dataType.encoding;
     _pmsr->byteorder   = 1;
 
     _pmsr->sequence_number = _sequence_number;
@@ -405,7 +494,7 @@ public:
     // the resolution to go down to the microsecond. msr_pack will do that if it
     // founds a blkt_1001_s
     struct blkt_1001_s blkt1001 = {0};
-    blkt1001.timing_qual        = 100; // best quality, not really useful
+    blkt1001.timing_qual = 100; // set to best quality (better way to use it?)
     if (!::msr_addblockette(_pmsr, reinterpret_cast<char *>(&blkt1001),
                             sizeof(struct blkt_1001_s), 1001, 0))
     {
@@ -424,10 +513,14 @@ public:
                      record, reclen);
 
       if (code < 0)
+      {
         throw UnrecoverableError(string("Error passing data to SeedLink: ") +
                                  ::strerror(errno));
+      }
       else if (code == 0)
+      {
         throw UnrecoverableError("Error passing data to SeedLink");
+      }
 
       THIS->_sequence_number = (THIS->_sequence_number + 1) % 1000000;
     };
@@ -435,10 +528,9 @@ public:
     int64_t packedSamples;
     if (::msr_pack(_pmsr, recordHandler, this, &packedSamples, 1, 0) < 0)
     {
+      // int64_t remaining_samples = numSamples - packedSamples;
       Log::error("msr_pack failed: dropping data");
     }
-
-    // int64_t remaining_samples = numSamples - packedSamples;
   }
 };
 
@@ -458,14 +550,23 @@ private:
     BIG,
     LITTLE
   };
+
+  enum class SampleType
+  {
+    INT8,
+    INT16,
+    INT32,
+    FLOAT32,
+    FLOAT64
+  };
+
   struct ChannelSettings
   {
     unsigned samplingRate;
     Endianness endianness;
     unsigned sampleSize;
+    SampleType sampleType;
   };
-
-  static const unsigned MAX_SAMPLES = 1e6; // no specific reason for this value
 
   TcpClient _client;
   unordered_map<unsigned, Stream> _stream;
@@ -474,9 +575,17 @@ private:
   void handshake()
   {
     // agree on the protocol
-    _client.sendLine("RAW 1.0");
-    if (_client.receiveLine() != "RAW 1.0")
-      throw RecoverableError("Protocol error");
+    _client.sendLine("RAW 1.1");
+    string clientVersion = _client.receiveLine();
+
+    Log::info("Client protocol version %s", clientVersion.c_str());
+
+    if (clientVersion != "RAW 1.0" && clientVersion != "RAW 1.1")
+    {
+      throw RecoverableError(
+          "Protocol error: unsupported client protocol version " +
+          clientVersion);
+    }
 
     _chSettings.clear();
 
@@ -532,28 +641,217 @@ private:
 
       string type = _client.receiveLine();
       if (type == "int8")
+      {
         settings.sampleSize = 1;
+        settings.sampleType = SampleType::INT8;
+      }
       else if (type == "int16")
+      {
         settings.sampleSize = 2;
+        settings.sampleType = SampleType::INT16;
+      }
       else if (type == "int32")
+      {
         settings.sampleSize = 4;
+        settings.sampleType = SampleType::INT32;
+      }
+      else if (type == "float32")
+      {
+        settings.sampleSize = 4;
+        settings.sampleType = SampleType::FLOAT32;
+      }
+      else if (type == "float64")
+      {
+        settings.sampleSize = 8;
+        settings.sampleType = SampleType::FLOAT64;
+      }
       else
+      {
         throw RecoverableError("Received invalid sample type '" + type +
                                "' from the server");
+      }
       Log::info("Server says channel %u data type is %s", channel,
                 type.c_str());
 
       _chSettings[channel] = settings;
 
       kv.second.msStreamer.reset(new MiniSeedStreamer(
-          networkCode, stationCode, kv.second.locationCode, kv.second.channelCode,
-          settings.samplingRate, mseedEncoding));
+          networkCode, stationCode, kv.second.locationCode,
+          kv.second.channelCode, settings.samplingRate, mseedEncoding));
     }
 
     // start streaming data
     _client.sendLine("START");
     if (_client.receiveLine() != "STARTING")
       throw RecoverableError("Protocol error: expecting STARTING");
+  }
+
+  void feedSample(const unsigned char *ds,
+                  const ChannelSettings &settings,
+                  MiniSeedStreamer *msStreamer)
+  {
+    // ds: data sample, pointer to the sample in the data buffer
+
+    switch (settings.sampleType)
+    {
+
+    case SampleType::INT8: {
+      int32_t sample = static_cast<char>(ds[0]);
+      msStreamer->feed(sample);
+    }
+    break;
+
+    case SampleType::INT16: {
+      int32_t sample = 0;
+      if (settings.endianness == Endianness::BIG)
+      {
+        sample = static_cast<int16_t>(uint16_t(ds[0]) << 8 | uint16_t(ds[1]));
+      }
+      else if (settings.endianness == Endianness::LITTLE)
+      {
+        sample = static_cast<int16_t>(uint16_t(ds[1]) << 8 | uint16_t(ds[0]));
+      }
+      msStreamer->feed(sample);
+    }
+    break;
+
+    case SampleType::INT32: {
+      int32_t sample = 0;
+      if (settings.endianness == Endianness::BIG)
+      {
+        sample =
+            static_cast<int32_t>(uint32_t(ds[0]) << 24 |
+                                 uint32_t(ds[1]) << 16 |
+                                 uint32_t(ds[2]) << 8  |
+                                 uint32_t(ds[3]));
+      }
+      else if (settings.endianness == Endianness::LITTLE)
+      {
+        sample =
+            static_cast<int32_t>(uint32_t(ds[3]) << 24 |
+                                 uint32_t(ds[2]) << 16 |
+                                 uint32_t(ds[1]) << 8  |
+                                 uint32_t(ds[0]));
+      }
+      msStreamer->feed(sample);
+    }
+    break;
+
+    case SampleType::FLOAT32: {
+      static const Endianness hostEndianness = floatEndianness();
+
+      float sample                           = 0;
+      unsigned char *sp                      = (unsigned char *)&sample;
+
+      if (hostEndianness == Endianness::UNDEFINED)
+      {
+        throw UnrecoverableError("Could not determine host float endianness");
+      }
+      else if (settings.endianness == hostEndianness)
+      {
+        sp[0] = ds[0];
+        sp[1] = ds[1];
+        sp[2] = ds[2];
+        sp[3] = ds[3];
+      }
+      else
+      {
+        sp[0] = ds[3];
+        sp[1] = ds[2];
+        sp[2] = ds[1];
+        sp[3] = ds[0];
+      }
+
+      msStreamer->feed(sample);
+    }
+    break;
+
+    case SampleType::FLOAT64: {
+      static const Endianness hostEndianness = doubleEndianness();
+
+      double sample     = 0;
+      unsigned char *sp = (unsigned char *)&sample;
+
+      if (hostEndianness == Endianness::UNDEFINED)
+      {
+        throw UnrecoverableError("Could not determine host double endianness");
+      }
+      else if (settings.endianness == hostEndianness)
+      {
+        sp[0] = ds[0];
+        sp[1] = ds[1];
+        sp[2] = ds[2];
+        sp[3] = ds[3];
+        sp[4] = ds[4];
+        sp[5] = ds[5];
+        sp[6] = ds[6];
+        sp[7] = ds[7];
+      }
+      else
+      {
+        sp[0] = ds[7];
+        sp[1] = ds[6];
+        sp[2] = ds[5];
+        sp[3] = ds[4];
+        sp[4] = ds[3];
+        sp[5] = ds[2];
+        sp[6] = ds[1];
+        sp[7] = ds[0];
+      }
+      msStreamer->feed(sample);
+    }
+    break;
+    } // switch
+  }
+
+  static const unsigned MAX_SAMPLES = 1e6; // no specific reason for this value
+
+  static Endianness floatEndianness()
+  {
+    static const float f = -1.7247773e-34; // 0x87654321, IEEE-754 binary32
+    static const unsigned char f_big[4]    = {0x87, 0x65, 0x43, 0x21};
+    static const unsigned char f_little[4] = {0x21, 0x43, 0x65, 0x87};
+
+    if (sizeof(float) != 4)
+    {
+      return Endianness::UNDEFINED;
+    }
+    else if (memcmp(&f, f_big, 4) == 0)
+    {
+      return Endianness::BIG;
+    }
+    else if (memcmp(&f, f_little, 4) == 0)
+    {
+      return Endianness::LITTLE;
+    }
+    else
+    {
+      return Endianness::UNDEFINED;
+    }
+  }
+
+  static Endianness doubleEndianness()
+  {
+    static const double d = -1.2312365908092656e+303; // 0xFEDCBA0987654321, IEEE-754 binary64
+    static const unsigned char d_big[8]    = {0xFE, 0xDC, 0xBA, 0x09, 0x87, 0x65, 0x43, 0x21};
+    static const unsigned char d_little[8] = {0x21, 0x43, 0x65, 0x87, 0x09, 0xBA, 0xDC, 0xFE};
+
+    if (sizeof(double) != 8)
+    {
+      return Endianness::UNDEFINED;
+    }
+    else if (memcmp(&d, d_big, 8) == 0)
+    {
+      return Endianness::BIG;
+    }
+    else if (memcmp(&d, d_little, 8) == 0)
+    {
+      return Endianness::LITTLE;
+    }
+    else
+    {
+      return Endianness::UNDEFINED;
+    }
   }
 
 public:
@@ -582,13 +880,13 @@ public:
     {
       string locationCode = m[1].str();
       string channelCode  = m[2].str();
-      unsigned channel = stoul(m[3].str());
+      unsigned channel    = stoul(m[3].str());
 
       _stream[channel] = {locationCode, channelCode, nullptr};
 
       Log::info("Server channel %d -> %s.%s.%s.%s", channel,
-                networkCode.c_str(), stationCode.c_str(),
-                locationCode.c_str(), channelCode.c_str());
+                networkCode.c_str(), stationCode.c_str(), locationCode.c_str(),
+                channelCode.c_str());
 
       input = input.substr(m.length());
     }
@@ -599,28 +897,18 @@ public:
     }
   }
 
-  ~RawClient() {}
+  ~RawClient() = default;
+
+  RawClient(const RawClient &other)            = delete;
+  RawClient &operator=(const RawClient &other) = delete;
+
+  RawClient(RawClient &&other)            = delete;
+  RawClient &operator=(RawClient &&other) = delete;
 
   void run()
   {
-    auto bigToUint16 = [](unsigned char a[2]) -> uint16_t {
-      return (uint16_t(a[0]) << 8) | a[1];
-    };
-    auto bigToUint32 = [](unsigned char a[4]) -> uint32_t {
-      return (uint32_t(a[0]) << 24) | (uint32_t(a[1]) << 16) |
-             (uint32_t(a[2]) << 8) | a[3];
-    };
-    auto littleToUint16 = [](unsigned char a[2]) -> uint16_t {
-      return (uint16_t(a[1]) << 8) | a[0];
-    };
-    auto littleToUint32 = [](unsigned char a[4]) -> uint32_t {
-      return (uint32_t(a[3]) << 24) | (uint32_t(a[2]) << 16) |
-             (uint32_t(a[1]) << 8) | a[0];
-    };
-
     unsigned char hdrBuf[19];
     vector<unsigned char> dataBuf;
-    vector<int32_t> sampleBuf;
 
     for (;;)
     {
@@ -645,6 +933,14 @@ public:
           uint32_t numSamples;
         } header;
 
+        auto bigToUint16 = [](unsigned char a[2]) -> uint16_t {
+          return (uint16_t(a[0]) << 8) | a[1];
+        };
+        auto bigToUint32 = [](unsigned char a[4]) -> uint32_t {
+          return (uint32_t(a[0]) << 24) | (uint32_t(a[1]) << 16) |
+                 (uint32_t(a[2]) << 8) | a[3];
+        };
+
         header.pt.year    = bigToUint16(&hdrBuf[0]);
         header.pt.yday    = bigToUint16(&hdrBuf[2]);
         header.pt.hour    = hdrBuf[4];
@@ -667,52 +963,34 @@ public:
           throw RecoverableError("Received unrequested channel");
 
         const ChannelSettings settings = _chSettings[header.channel];
+        MiniSeedStreamer *msStreamer =
+            _stream.at(header.channel).msStreamer.get();
 
         //
         // Read samples from the server
         //
         unsigned dataSize = header.numSamples * settings.sampleSize;
-        if (dataBuf.size() < dataSize) dataBuf.resize(dataSize);
+        if (dataBuf.size() < dataSize)
+        {
+          dataBuf.resize(dataSize);
+        }
 
         unsigned char *data = dataBuf.data();
         _client.receive(data, dataSize);
 
         //
         // Convert samples and pass them to Seedlink
-        // 
-        if (sampleBuf.size() < header.numSamples)
-          sampleBuf.resize(header.numSamples);
+        //
+        msStreamer->prepare(header.numSamples);
 
-        int32_t *samples = sampleBuf.data();
         for (unsigned i = 0; i < header.numSamples; i++)
         {
-          int32_t sample = 0;
-          if (settings.sampleSize == 1)
-            sample = static_cast<char>(data[i]);
-          else if (settings.sampleSize == 2)
-          {
-            if (settings.endianness == Endianness::BIG)
-              sample = static_cast<int16_t>(
-                  bigToUint16(&data[i * settings.sampleSize]));
-            else if (settings.endianness == Endianness::LITTLE)
-              sample = static_cast<int16_t>(
-                  littleToUint16(&data[i * settings.sampleSize]));
-          }
-          else if (settings.sampleSize == 4)
-          {
-            if (settings.endianness == Endianness::BIG)
-              sample = static_cast<int32_t>(
-                  bigToUint32(&data[i * settings.sampleSize]));
-            else if (settings.endianness == Endianness::LITTLE)
-              sample = static_cast<int32_t>(
-                  littleToUint32(&data[i * settings.sampleSize]));
-          }
-          samples[i] = sample;
+          unsigned char *dataSample = &data[i * settings.sampleSize];
+          feedSample(dataSample, settings, msStreamer);
         }
 
         // Log::info("Sending %d samples to seedlink", header.numSamples);
-        _stream.at(header.channel)
-            .msStreamer->sendtoSeedlink(&header.pt, samples, header.numSamples);
+        msStreamer->send(&header.pt);
       }
       catch (RecoverableError &e)
       {
@@ -754,7 +1032,8 @@ void printUsageAndExit(int argc, char **argv)
   Log::error("    -s host    server address, required");
   Log::error("    -p port    server port");
   Log::error("    -c stream  the stream the data refers to (NET.STA)");
-  Log::error("    -m chmap   map of location and channel codes to server channel numbers");
+  Log::error("    -m chmap   map of location and channel codes to server "
+             "channel numbers");
   Log::error("Options:");
   Log::error("    -r secs    sleep time in seonds before reconnecting");
   Log::error("                after an EOF or connect failure,");
@@ -772,8 +1051,8 @@ int main(int argc, char **argv)
   string stream;
   string channelCodeMap;
   string mseedEncoding = "STEIM2";
-  int sleepTime   = 60;
-  bool daemonMode = false;
+  int sleepTime        = 60;
+  bool daemonMode      = false;
 
   if (argc < 2)
   {
@@ -808,8 +1087,8 @@ int main(int argc, char **argv)
     Log::error("-c option should be in the format STA.NET");
     quit();
   }
-  string networkCode  = tokens[0];
-  string stationCode  = tokens[1];
+  string networkCode = tokens[0];
+  string stationCode = tokens[1];
 
   struct sigaction sa;
   sa.sa_handler = quit;

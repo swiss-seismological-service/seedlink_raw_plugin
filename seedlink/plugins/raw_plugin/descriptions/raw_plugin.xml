@@ -15,7 +15,7 @@
 			</parameter>
  			<parameter name="miniSeedEncoding" type="string" default="STEIM2">
 				 <description>
-				 The data packets received by the raw plugin are converted to miniseeds and passed to seedlink. This parameter defines the encoding of the miniseed samples. Available options are: ASCII, INT16, INT32, STEIM1 and STEIM2
+				 The data packets received by the raw plugin are converted to miniseeds and passed to seedlink. This parameter defines the encoding of the miniseed samples. The available options are: INT16, INT32, STEIM1, STEIM2, FLOAT32 and FLOAT64. The selected type should be compatible with the data actually transmitted e.g. transmitting integers and storing them as STEIM2.
 				 </description>
  			</parameter>
 			<parameter name="channelProfiles" type="string">
