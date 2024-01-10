@@ -19,8 +19,8 @@ settings may be:
 - int8, int16, int32, float32, float64
 - little-endian, big-endian 
 - sample rate (max 1MHz)
-- 
-The data packets, once received by the seedkink plugin, are eventually converted to miniseeds
+
+The data packets, once received by the seedlink plugin, are eventually converted to miniseeds
 and passed to seedlink server, which make them available to any application connecting to it
 e.g. SeisComP.
 
@@ -51,14 +51,14 @@ logging.getLogger("raw_server").setLevel(logging.INFO)
 # intend to map in seiscomp to a single station with 2 location codes:
 
 # Station 1 (3 components)
-c1 = Channel(id=1, samprate=200, endianness=sys.byteorder, samptype="int32")
-c2 = Channel(id=2, samprate=200, endianness=sys.byteorder, samptype="int32")
-c3 = Channel(id=3, samprate=200, endianness=sys.byteorder, samptype="int32")
+c1 = rs.Channel(id=1, samprate=200, endianness=sys.byteorder, samptype="int32")
+c2 = rs.Channel(id=2, samprate=200, endianness=sys.byteorder, samptype="int32")
+c3 = rs.Channel(id=3, samprate=200, endianness=sys.byteorder, samptype="int32")
 
 # Station 2 (3 components)
-c3 = Channel(id=4, samprate=100, endianness=sys.byteorder, samptype="int16")
-c4 = Channel(id=5, samprate=100, endianness=sys.byteorder, samptype="int16")
-c5 = Channel(id=6, samprate=100, endianness=sys.byteorder, samptype="int16")
+c3 = rs.Channel(id=4, samprate=100, endianness=sys.byteorder, samptype="int16")
+c4 = rs.Channel(id=5, samprate=100, endianness=sys.byteorder, samptype="int16")
+c5 = rs.Channel(id=6, samprate=100, endianness=sys.byteorder, samptype="int16")
 
 #
 # create a streaming server that will run as a separate process and wait for
