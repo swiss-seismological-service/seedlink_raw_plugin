@@ -19,6 +19,7 @@ settings may be:
 - int8, int16, int32, float32, float64
 - little-endian, big-endian 
 - sample rate (max 1MHz)
+- 
 The data packets, once received by the seedkink plugin, are eventually converted to miniseeds
 and passed to seedlink server, which make them available to any application connecting to it
 e.g. SeisComP.
