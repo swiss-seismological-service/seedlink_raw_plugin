@@ -87,6 +87,35 @@ class Client:
             self.data_available.set()
 
     async def handle_connection(self):
+        reading_task = asyncio.create_task(self.handle_read_connection())
+        writing_task = asyncio.create_task(self.handle_write_connection())
+        # Loop forever or until the peer close the connection
+        done, pending = await asyncio.wait([reading_task, writing_task],
+                                           return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Unexpected Exception: {e}")
+
+    async def handle_read_connection(self):
+        if not self.channel_ids:
+            return
+        #
+        # The protocol doesn't allow the peer to send data. So we monitor
+        # this side of the connection to detect a possible socket closed
+        # Something that we cannot monitor on the write side of the connection
+        # If we don't do this and there is no data to be sent to the peer
+        # we will never notice a closed connection initiated by the peer
+        #
+        data = await self.reader.read(1)
+        if data:
+            logger.error(f"Received unexpected data from peer {self.peername!r}")
+
+    async def handle_write_connection(self):
         if not self.channel_ids:
             return
         while True:
