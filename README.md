@@ -56,9 +56,9 @@ c2 = rs.Channel(id=2, samprate=200, endianness=sys.byteorder, samptype="int32")
 c3 = rs.Channel(id=3, samprate=200, endianness=sys.byteorder, samptype="int32")
 
 # Station 2 (3 components)
-c3 = rs.Channel(id=4, samprate=100, endianness=sys.byteorder, samptype="int16")
-c4 = rs.Channel(id=5, samprate=100, endianness=sys.byteorder, samptype="int16")
-c5 = rs.Channel(id=6, samprate=100, endianness=sys.byteorder, samptype="int16")
+c4 = rs.Channel(id=4, samprate=100, endianness=sys.byteorder, samptype="int16")
+c5 = rs.Channel(id=5, samprate=100, endianness=sys.byteorder, samptype="int16")
+c6 = rs.Channel(id=6, samprate=100, endianness=sys.byteorder, samptype="int16")
 
 #
 # create a streaming server that will run as a separate process and wait for
