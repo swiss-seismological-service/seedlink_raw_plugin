@@ -2,12 +2,17 @@
 [Seedlink](<https://github.com/SeisComP/seedlink>) plugin for custom data streaming to [SeisComP](<https://github.com/SeisComP>)
 
 This plugin can be included in the SeisComP Seedlink implementation and allows to stream
-custom data to SeisComP. This RAW plugin, running within the seedlink server, connects to 
-the provided raw_server.py, which has to run on the device that provides the data.
+custom data to SeisComP. This `RAW` plugin, running within the seedlink server, connects to 
+the provided `raw_server.py`, which has to run on the device that provides the data.
 
-The raw_server.py provides the API to stream your data without worring about the protocol
-details. If you cannot use the raw_server in your device, you can create your own
-implementation and use raw_server.py as a reference.
+The `raw_server.py` provides the API to stream your data to the `RAW` seedlink plugin without
+worring about the protocol details. If you cannot use the `raw_server.py` in your device, you
+can create your own implementation in any language.
+
+If you want to make you device a fully fledged seedlink server, then install SeiComP
+(or just seedklink) in the same machine where the `raw_server` is running, then configure
+the `RAW` seedlink plugin to connect to `localhost`. The locally running seedlink server
+will then be able to serve your custom data.
 
 ## How it works
 
