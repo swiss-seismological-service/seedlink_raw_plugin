@@ -460,13 +460,16 @@ public:
 
   void feed(double sample) { _sampleBuf->feed(sample); }
 
-  void send(const struct ptime *pt)
+  void send(const struct ptime *pt, uint8_t timeQuality)
   {
-    send(pt, _sampleBuf->data(), _sampleBuf->numSamples());
+    send(pt, timeQuality, _sampleBuf->data(), _sampleBuf->numSamples());
   }
 
 private:
-  void send(const struct ptime *pt, void *dataptr, int64_t numSamples)
+  void send(const struct ptime *pt,
+            uint8_t timeQuality,
+            void *dataptr,
+            int64_t numSamples)
   {
     // Disconnect datasamples pointer, otherwise mst_init() will free it
     _pmsr->datasamples = nullptr;
@@ -493,8 +496,8 @@ private:
     // The SEED format handles down to 100μsecs, but adding blocket 1001 allow
     // the resolution to go down to the microsecond. msr_pack will do that if it
     // founds a blkt_1001_s
-    struct blkt_1001_s blkt1001 = {0};
-    blkt1001.timing_qual = 100; // set to best quality (better way to use it?)
+    struct blkt_1001_s blkt1001{};
+    blkt1001.timing_qual = timeQuality;
     if (!::msr_addblockette(_pmsr, reinterpret_cast<char *>(&blkt1001),
                             sizeof(struct blkt_1001_s), 1001, 0))
     {
@@ -575,12 +578,12 @@ private:
   void handshake()
   {
     // agree on the protocol
-    _client.sendLine("RAW 1.1");
+    _client.sendLine("RAW 2.0");
     string clientVersion = _client.receiveLine();
 
     Log::info("Client protocol version %s", clientVersion.c_str());
 
-    if (clientVersion != "RAW 1.0" && clientVersion != "RAW 1.1")
+    if (clientVersion != "RAW 2.0")
     {
       throw RecoverableError(
           "Protocol error: unsupported client protocol version " +
@@ -804,7 +807,10 @@ private:
     } // switch
   }
 
-  static const unsigned MAX_SAMPLES = 1e6; // no specific reason for this value
+  static const unsigned MAX_SAMPLES = 1e6; // 1 seconds at 1MHz
+                                           // no specific reason for this value
+                                           // just to avoid unlimited data
+                                           // transfer
 
   static Endianness floatEndianness()
   {
@@ -907,7 +913,7 @@ public:
 
   void run()
   {
-    unsigned char hdrBuf[19];
+    unsigned char hdrBuf[18];
     vector<unsigned char> dataBuf;
 
     for (;;)
@@ -929,7 +935,8 @@ public:
         struct
         {
           struct ptime pt;
-          uint32_t channel;
+          uint8_t timeQuality;
+          uint16_t channel;
           uint32_t numSamples;
         } header;
 
@@ -941,14 +948,15 @@ public:
                  (uint32_t(a[2]) << 8) | a[3];
         };
 
-        header.pt.year    = bigToUint16(&hdrBuf[0]);
-        header.pt.yday    = bigToUint16(&hdrBuf[2]);
-        header.pt.hour    = hdrBuf[4];
-        header.pt.minute  = hdrBuf[5];
-        header.pt.second  = hdrBuf[6];
-        header.pt.usec    = bigToUint32(&hdrBuf[7]);
-        header.channel    = bigToUint32(&hdrBuf[11]);
-        header.numSamples = bigToUint32(&hdrBuf[15]);
+        header.pt.year     = bigToUint16(&hdrBuf[0]);
+        header.pt.yday     = bigToUint16(&hdrBuf[2]);
+        header.pt.hour     = hdrBuf[4];
+        header.pt.minute   = hdrBuf[5];
+        header.pt.second   = hdrBuf[6];
+        header.pt.usec     = bigToUint32(&hdrBuf[7]);
+        header.timeQuality = hdrBuf[11];
+        header.channel     = bigToUint16(&hdrBuf[12]);
+        header.numSamples  = bigToUint32(&hdrBuf[14]);
 
         // Log::info("Header content: num samples %d channel %d (year %d"
         //           " day %d hour %d minute %d second %d usec %d)",
@@ -990,7 +998,7 @@ public:
         }
 
         // Log::info("Sending %d samples to seedlink", header.numSamples);
-        msStreamer->send(&header.pt);
+        msStreamer->send(&header.pt, header.timeQuality);
       }
       catch (RecoverableError &e)
       {

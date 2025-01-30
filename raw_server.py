@@ -25,6 +25,7 @@ import math
 from random import randrange
 from logging.handlers import RotatingFileHandler
 
+
 def setup_logger(name):
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
@@ -35,6 +36,7 @@ def setup_logger(name):
     hdlr.setFormatter(formatter)
     logger.addHandler(hdlr)
     return logger
+
 
 #
 # "raw_api" is the logger used by the raw_server API and
@@ -48,9 +50,10 @@ logger = setup_logger("raw_api")
 
 
 class Data:
-    def __init__(self, channel_id, time, samples, num_samples):
+    def __init__(self, channel_id, time, time_quality, samples, num_samples):
         self.channel_id = channel_id
         self.time = time
+        self.time_quality = time_quality
         self.samples = samples
         self.num_samples = num_samples
 
@@ -113,7 +116,8 @@ class Client:
         #
         data = await self.reader.read(1)
         if data:
-            logger.error(f"Received unexpected data from peer {self.peername!r}")
+            logger.error(
+                f"Received unexpected data from peer {self.peername!r}")
 
     async def handle_write_connection(self):
         if not self.channel_ids:
@@ -150,7 +154,11 @@ class Client:
                                                    byteorder="big",
                                                    signed=False))
                 self.writer.write(
-                    data.channel_id.to_bytes(length=4,
+                    data.time_quality.to_bytes(length=1,
+                                              byteorder="big",
+                                              signed=False))
+                self.writer.write(
+                    data.channel_id.to_bytes(length=2,
                                              byteorder="big",
                                              signed=False))
                 self.writer.write(
@@ -174,10 +182,12 @@ class Client:
 
 class Channel:
     def __init__(self, id, samprate, endianness, samptype):
+        if id < 0 or id > 65535:
+            raise ValueError("Channel id must be in range 0 - 65535")
         self.id = id
-        self.samprate   = samprate   # samples per second
-        self.endianness = endianness # "big" or "little"
-        self.samptype   = samptype   # "int8", "int16", "int32", "float32", "float64"
+        self.samprate = samprate   # samples per second
+        self.endianness = endianness  # "big" or "little"
+        self.samptype = samptype   # "int8", "int16", "int32", "float32", "float64"
 
 
 class Server:
@@ -285,10 +295,10 @@ class Server:
 
     async def client_handshake(self, client):
         line = await client.readline()
-        if line != "RAW 1.1":
+        if line != "RAW 2.0":
             logger.error(f"Received {line}")
             return False
-        await client.writeline("RAW 1.1")
+        await client.writeline("RAW 2.0")
         while True:
             line = await client.readline()
 
@@ -338,7 +348,7 @@ def _start_asyncio_server(channels, data_conn, host, port, backlog):
         "[%(asctime)s] %(levelname)s [pid %(process)d - %(message)s",
         datefmt="%d.%m.%Y %H:%M:%S")
     # logger.StreamHandler() for debugging
-    hdlr = RotatingFileHandler('raw_servers.log')
+    hdlr = RotatingFileHandler('raw_server.log')
     hdlr.setFormatter(formatter)
     logger.addHandler(hdlr)
     #
@@ -391,12 +401,19 @@ class Streamer():
         fmt = fmt_map[ch.samptype]
         return f"{endianness}{fmt}"
 
-    def feed_data(self, channel_id, samptime, samples):
+    def feed_data(self, channel_id, samptime, timing_quality, samples):
         if channel_id not in self.channels:
-            logger.warning(f"Channel id {channel_id} not configured")
-            return
-        final_samples = np.ascontiguousarray(samples, dtype=self.ch_dtypes[channel_id])
-        data = Data(channel_id, samptime, final_samples.tobytes(), final_samples.size)
+            raise ValueError(f"Channel id {channel_id} not configured")
+        if timing_quality < 0 or timing_quality > 100:
+            raise ValueError("timingQuality must be in range 0 - 100")
+        final_samples = np.ascontiguousarray(
+            samples, dtype=self.ch_dtypes[channel_id])
+        data = Data(
+            channel_id,
+            samptime,
+            timing_quality,
+            final_samples.tobytes(),
+            final_samples.size)
         try:
             self.data_conn.send(data)
         except Exception as e:
@@ -440,15 +457,15 @@ if __name__ == "__main__":
     # Test with 3 streamer servers
     #
     channels = [Channel(1, 2000, sys.byteorder, "int8"),
-                Channel(2,   75, "big",    "int16"),
-                Channel(3,   40, "little", "int16"),
-                Channel(4,   45, "big",    "int32"),
-                Channel(5,   80, "little", "int32"),
-                Channel(6,   75, "big",    "float32"),
-                Channel(7,  120, "little", "float32"),
-                Channel(8,  165, "big",    "float64"),
-                Channel(9,   82, "little", "float64")
-    ]
+                Channel(2, 75, "big", "int16"),
+                Channel(3, 40, "little", "int16"),
+                Channel(4, 45, "big", "int32"),
+                Channel(5, 80, "little", "int32"),
+                Channel(6, 75, "big", "float32"),
+                Channel(7, 120, "little", "float32"),
+                Channel(8, 165, "big", "float64"),
+                Channel(9, 82, "little", "float64")
+                ]
     streamers = [
         Streamer(channels, host="127.0.0.1", port=65535),
         Streamer(channels, host="127.0.0.1", port=65534),
@@ -490,7 +507,7 @@ if __name__ == "__main__":
                         s *= 2
                     samples.append(s)
 
-                streamer.feed_data(channel.id, next_samples_time, samples)
+                streamer.feed_data(channel.id, next_samples_time, 100, samples)
     #
     # stop the servers
     #

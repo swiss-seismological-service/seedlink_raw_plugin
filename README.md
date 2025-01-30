@@ -45,13 +45,17 @@ import raw_server as rs
 
 #
 # Set the preferred log levels for the api and the server processes
-# The spawned server(s) will log to the file raw_servers.log
+# The spawned server(s) will log to the file raw_server.log
 #
 logging.getLogger("raw_api").setLevel(logging.INFO)
 logging.getLogger("raw_server").setLevel(logging.INFO)
 
 #
 # Channel defines the properties of the data we want to stream
+# id: channel identifier (range 0-65535)
+# samprate: max 1Mhz
+# samptype: int8, int16, int32, float32, float64
+#
 # In this exaple we stream 2 sensors, each one with 3 components, that we
 # intend to map in seiscomp to a single station with 2 location codes:
 
@@ -81,22 +85,25 @@ while True:
   # Here put your device logic: once you got the device data (samples and
   # sample time) pass it to the streamer via `streamer.feed_data()` method
   #
-  sta1_samptime, sta1_comp1_samples, sta1_comp2_samples, sta1_comp3_samples = device_driver_station1.get_data()
-  sta2_samptime, sta2_comp1_samples, sta2_comp2_samples, sta2_comp3_samples = device_driver_station2.get_data()
+  st1 = device_driver_station1.get_data()
+  st2 = device_driver_station2.get_data()
 
-  # channel_id: what channel the data belongs to
-  # samptime: start timestamp of the samples (type datetime.datetime)
+  # channel_id: what channel the data belongs to (range 0-65535)
+  # samptime: start timestamp of the samples (type datetime.datetime) micro sec resolution
+  # timing_quality: mapped to Miniseed Timing quality in Data Extension Blockette
+  #                1001. Vendor specific value from 0 to 100 of maximum accuracy,
+  #                taking into account both clock quality and data flags
   # samples: array like (numpy array, list) containing the data samples, which
   #           will be converted by the api to the Channel samptype and endianness
-  #           before streaming it
+  #           before streaming it.
   #
-  streamer.feed_data( channel_id=1, sta1_samptime, sta1_comp1_samples )
-  streamer.feed_data( channel_id=2, sta1_samptime, sta1_comp2_samples )
-  streamer.feed_data( channel_id=3, sta1_samptime, sta1_comp3_samples )
+  streamer.feed_data(channel_id=1, st1.samptime, st1.time_quality, st1.comp1_samples)
+  streamer.feed_data(channel_id=2, st1.samptime, st1.time_quality, st1.comp2_samples)
+  streamer.feed_data(channel_id=3, st1.samptime, st1.time_quality, st1.comp3_samples)
 
-  streamer.feed_data( channel_id=4, sta2_samptime, sta2_comp1_samples )
-  streamer.feed_data( channel_id=5, sta2_samptime, sta2_comp2_samples )
-  streamer.feed_data( channel_id=6, sta2_samptime, sta2_comp3_samples )
+  streamer.feed_data(channel_id=4, st2.samptime, st2.time_quality, st2.comp1_samples)
+  streamer.feed_data(channel_id=5, st2.samptime, st2.time_quality, st2.comp2_samples)
+  streamer.feed_data(channel_id=6, st2.samptime, st2.time_quality, st2.comp3_samples)
 ```
 
 ## Installation
