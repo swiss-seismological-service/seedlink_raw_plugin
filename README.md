@@ -73,8 +73,8 @@ streamer = rs.Streamer(channels=[c1,c2,c3,c4,c5,c6], host="127.0.0.1", port=6553
 streamer.start()
 
 #
-# Read data from hardware and pass it to the streamer that makes them available
-# to whoever connects to it adn request the registered channels
+# Read data from hardware and pass it to the streamer that makes it available
+# to connected clients (seedlink raw plugins)
 #
 while True:
   #
