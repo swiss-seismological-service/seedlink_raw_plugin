@@ -393,7 +393,7 @@ class Streamer():
         self.server_process = server_process
         self.data_conn = write_conn
         self.server_process.start()
-        self.last_start = datetime.datetime.utcnow()
+        self.last_start =  datetime.datetime.now(datetime.UTC)
 
     def numpy_dtype(self, ch):
         endianness = ">" if ch.endianness == "big" else "<"
@@ -482,14 +482,14 @@ if __name__ == "__main__":
     # simulate data
     #
     duration = datetime.timedelta(seconds=300)
-    start_time = datetime.datetime.utcnow()
+    start_time = datetime.datetime.now(datetime.UTC)
     next_samples_time = start_time
 
     logger.info("Starting streaming...")
     while next_samples_time - start_time < duration:
 
         next_samples_time += datetime.timedelta(seconds=1)
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.UTC)
         sleep_time = (next_samples_time - now).total_seconds()
 
         if sleep_time > 0:
