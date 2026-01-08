@@ -508,6 +508,8 @@ private:
     _pmsr->starttime = ms_time2nstime(pt->year, pt->yday, pt->hour, pt->minute,
                                       pt->second, pt->usec*1000);
 
+    _sequence_number = (_sequence_number + 1) % 1000000;
+
     const auto recordHandler = [](char *record, int reclen, void *handlerdata) {
       MiniSeedStreamer *THIS =
           reinterpret_cast<MiniSeedStreamer *>(handlerdata);
@@ -527,8 +529,6 @@ private:
       {
         throw UnrecoverableError("Error passing data to SeedLink");
       }
-
-      THIS->_sequence_number = (THIS->_sequence_number + 1) % 1000000;
     };
 
     int64_t packedSamples;
