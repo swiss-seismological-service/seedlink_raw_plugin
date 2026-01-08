@@ -26,7 +26,7 @@ from random import randrange
 from logging.handlers import RotatingFileHandler
 
 
-def setup_logger(name):
+def setup_api_logger(name):
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
     formatter = logging.Formatter(
@@ -37,17 +37,25 @@ def setup_logger(name):
     logger.addHandler(hdlr)
     return logger
 
-
+def setup_server_logger(name):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        "[%(asctime)s] %(levelname)s [pid %(process)d - %(message)s",
+        datefmt="%d.%m.%Y %H:%M:%S")
+    # hdlr = logging.StreamHandler() # for debugging
+    hdlr = RotatingFileHandler('raw_server.log')
+    hdlr.setFormatter(formatter)
+    logger.addHandler(hdlr)
+    return logger
 #
-# "raw_api" is the logger used by the raw_server API and
-# can be customized by the API client to reflect their
-# preferences
-# However the server(s), which are separate processes, use
-# a different logger called "raw_server" that logs to file
-# (raw_server.log) by default.
+# "raw_api" is the logger used by the raw_server API. However the server(s),
+# which are separate processes, use a different logger called "raw_server".
+# Here we set up the default configuration for the loggers, but they can be
+# customized by the API client to reflect their preferences
 #
-logger = setup_logger("raw_api")
-
+logger = setup_api_logger("raw_api")
+setup_server_logger("raw_server")
 
 class Data:
     def __init__(self, channel_id, time, time_quality, samples, num_samples):
@@ -339,18 +347,11 @@ class Server:
 
 def _start_asyncio_server(channels, data_conn, host, port, backlog):
     #
-    # Set up a file logger for all the spawned servers
+    # Replace the global logger with "raw_server" one. Since we are a separate
+    # proces this will affect only the servers
     #
     global logger
     logger = logging.getLogger("raw_server")
-    logger.setLevel(logging.INFO)
-    formatter = logging.Formatter(
-        "[%(asctime)s] %(levelname)s [pid %(process)d - %(message)s",
-        datefmt="%d.%m.%Y %H:%M:%S")
-    # logger.StreamHandler() for debugging
-    hdlr = RotatingFileHandler('raw_server.log')
-    hdlr.setFormatter(formatter)
-    logger.addHandler(hdlr)
     #
     # Avoid being overwhelmed by asyncio logs -> set to WARNING
     #
