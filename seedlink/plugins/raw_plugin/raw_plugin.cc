@@ -368,7 +368,7 @@ private:
   };
 
 private:
-  MSRecord *_pmsr = nullptr;
+  MS3Record *_pmsr = nullptr;
   int _sequence_number;
   struct DataType
   {
@@ -376,6 +376,7 @@ private:
     char sampletype;
   } _dataType;
   unique_ptr<SampleBuffer> _sampleBuf;
+  std::string _extHdrBuf;
 
 public:
   const string networkCode;
@@ -395,7 +396,7 @@ public:
         locationCode(locationCode_), channelCode(channelCode_),
         samprate(samprate_)
   {
-    _pmsr = ::msr_init(nullptr);
+    _pmsr = ::msr3_init(nullptr);
     if (!_pmsr)
     {
       throw UnrecoverableError("msr_init failed");
@@ -441,9 +442,10 @@ public:
 
   ~MiniSeedStreamer()
   {
-    // Disconnect datasamples pointer, otherwise mst_free() will free it
+    // Disconnect pointers we own, otherwise msr3_free() will free it
     _pmsr->datasamples = nullptr;
-    ::msr_free(&_pmsr);
+    _pmsr->extra = nullptr;
+    ::msr3_free(&_pmsr);
   }
 
   MiniSeedStreamer(const MiniSeedStreamer &other)            = delete;
@@ -471,39 +473,40 @@ private:
             void *dataptr,
             int64_t numSamples)
   {
-    // Disconnect datasamples pointer, otherwise mst_init() will free it
+    // Disconnect pointers we own, otherwise msr3_init() will free it
     _pmsr->datasamples = nullptr;
-    ::msr_init(_pmsr);
+    _pmsr->extra = nullptr;
+    ::msr3_init(_pmsr);
 
     // Set header, always the same (Could we avoid re-initialization?)
-    _pmsr->reclen = PLUGIN_MSEED_SIZE;
-    strcpy(_pmsr->network, networkCode.c_str());
-    strcpy(_pmsr->station, stationCode.c_str());
-    strcpy(_pmsr->location, locationCode.c_str());
-    strcpy(_pmsr->channel, channelCode.c_str());
-    _pmsr->dataquality = 'D';
+    if ( ms_nslc2sid(_pmsr->sid, LM_SIDLEN, 0, networkCode.c_str(),
+                     stationCode.c_str(), locationCode.c_str(),
+                     channelCode.c_str()) < 0 )
+    {
+       throw UnrecoverableError("Could not create source identifier");
+    }
+    _pmsr->formatversion = 2; // force miniSEED v2 encoding
+    _pmsr->reclen      = PLUGIN_MSEED_SIZE;
     _pmsr->samprate    = samprate;
     _pmsr->sampletype  = _dataType.sampletype;
     _pmsr->encoding    = _dataType.encoding;
-    _pmsr->byteorder   = 1;
 
-    _pmsr->sequence_number = _sequence_number;
+    // Extra headers to force the creation of miniSEED v2 info not present
+    // anymore in MS3Record: msr.dataquality, msr.sequence_number and blkt_1001
+    // {"FDSN":{"DataQuality":"D","Sequence":???,"Time":{"Quality":???}}}
+    _extHdrBuf = R"({"FDSN":{"DataQuality":"D","Sequence":)" +
+                   std::to_string(_sequence_number) + R"(,"Time":{"Quality":)" +
+                   std::to_string(timeQuality) + "}}}";
+    _pmsr->extra = _extHdrBuf.data();
+    _pmsr->extralength = _extHdrBuf.length();
+
+
+    // Data
     _pmsr->datasamples     = dataptr;
     _pmsr->numsamples      = numSamples;
-    _pmsr->starttime = ms_time2hptime(pt->year, pt->yday, pt->hour, pt->minute,
-                                      pt->second, pt->usec);
-
-    // The SEED format handles down to 100μsecs, but adding blocket 1001 allow
-    // the resolution to go down to the microsecond. msr_pack will do that if it
-    // founds a blkt_1001_s
-    struct blkt_1001_s blkt1001{};
-    blkt1001.timing_qual = timeQuality;
-    if (!::msr_addblockette(_pmsr, reinterpret_cast<char *>(&blkt1001),
-                            sizeof(struct blkt_1001_s), 1001, 0))
-    {
-      Log::error("Error adding 1001 blockette: msr_addblockette failed");
-      return;
-    }
+    // Miniseed V3 supports nanoseconds, but we are forcing V2 (microseconds)
+    _pmsr->starttime = ms_time2nstime(pt->year, pt->yday, pt->hour, pt->minute,
+                                      pt->second, pt->usec*1000);
 
     const auto recordHandler = [](char *record, int reclen, void *handlerdata) {
       MiniSeedStreamer *THIS =
@@ -529,10 +532,11 @@ private:
     };
 
     int64_t packedSamples;
-    if (::msr_pack(_pmsr, recordHandler, this, &packedSamples, 1, 0) < 0)
+    uint32_t flags = MSF_FLUSHDATA | MSF_PACKVER2;
+    if (::msr3_pack(_pmsr, recordHandler, this, &packedSamples, flags, 0) < 0)
     {
       // int64_t remaining_samples = numSamples - packedSamples;
-      Log::error("msr_pack failed: dropping data");
+      Log::error("msr3_pack failed: dropping data");
     }
   }
 };
